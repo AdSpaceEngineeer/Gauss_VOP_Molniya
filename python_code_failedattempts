@@ -11,7 +11,6 @@ i0 = 1.10654
 om0 = math.pi*45/180
 w0 = math.pi*5/180
 M0 = math.pi*10/180
-
 mu = 398600
 J2 = 0.00108263
 R = 6370
@@ -85,14 +84,13 @@ def func_p_s(w, f, r_scal, i, leg_poly_prime):
 def func_p_w(r_scal, i, leg_poly_prime):
     return -1*(mu/r_scal**2)*math.cos(i)*J2*(R/r_scal)**2*leg_poly_prime
 
+######## FAILED CURTIS REVISED FOURTH EDITION EQUATIONS 10.88 ########
 #def curt_p_r(r_scal, i, w, f):
     #u = w + f
     #return (-3/2)*J2*mu*(R**2/r_scal**4)*(1-3*math.sin(i)**2*math.sin(u)**2)
-
 #def curt_p_s(r_scal, i, w, f):
     #u = w + f
     #return (-3/2)*J2*mu*(R**2/r_scal**4)*math.sin(i)**2*math.sin(2*u)
-
 #def curt_p_s(r_scal, i, w, f):
     #u = w + f
     #return (-3/2)*J2*mu*(R**2/r_scal**4)*math.sin(2*i)*math.sin(u)
@@ -123,39 +121,39 @@ def func_dwdt(a, w, f, e, p_r, r_scal, p_s, i, p_w):
     u = w + f
     h = (mu*a*(1-e**2))**0.5
     p = a*(1-e**2)
-    return ((1-e**2)**0.5/(n*a*e))*(-math.cos(f)*p_r + math.sin(f)*(1+r_scal/p)*p_s) - ((r_scal*(math.cos(i)/math.sin(i))*math.sin(u))/h)*p_w    
-    #ok
+    return ((1-e**2)**0.5/(n*a*e))*(-math.cos(f)*p_r + math.sin(f)*(1+r_scal/p)*p_s) - ((r_scal*(math.cos(i)/math.sin(i))*math.sin(u))/h)*p_w  #ok
 
+##### FAILED dMdt EQUATION FROM VALLADO THIRD EDITION EQUATION 9-24 ######
 #def func_dMdt(a, e, f, r_scal, p_r, p_s):
     #n = (mu/a**3)**0.5
     #p = a*(1-e**2)
     #return (1/(n*e*a**2))*((p*math.cos(f)-2*e*r_scal)*p_r - (p+r_scal)*math.sin(f)*p_s) #OK
 
-#ATTEMPT TO USE dfdt FROM BATTIN
+#WORKING BUT NOT ACCURATE ATTEMPT TO USE dfdt FROM BATTIN
 def func_dfdt(a, e, r_scal, f, p_r, p_s):
     h = (mu*a*(1-e**2))**0.5
     p = a*(1-e**2)
     return (h/r_scal**2) + (1/(e*h))*(p*math.cos(f)*p_r - (p+r_scal)*math.sin(f)*p_s)
 
-#ATTEMPT TO USE dfdt FROM VALLADO WITH dedt and dhdt components - FAILED
+############ FAILED ATTEMPT TO USE dfdt FROM VALLADO WITH dedt and dhdt COMPONENTS IN DERIVATION OF EQUATION 9-23
 #def func_dfdt(a, e, r_scal, p_s, f, dedt):
     #h = (mu*a*(1-e**2))**0.5
     #dhdt = r_scal*p_s
     #return (1/(r_scal*e*math.sin(f)))*(r_scal*math.cos(f)*dedt - (2*h/mu)*dhdt)
     
-#ATTEMPT TO USE dfdt FROM VALLADO - FAILED
+############ FAILED ATTEMPT TO USE dfdt FROM VALLADO IN DERIVATION OF EQUATION 9-23
 #def func_dfdt(a, e, f, p_r, p_s):
     #n = (mu/a**3)**0.5
     #return ((1-e**2)**0.5/(n*a*e))*(math.cos(f)*p_r - ((2+e*math.cos(f))/(1+e*math.cos(f)))*p_s)
 
-#ATTEMPT TO INCLUDE t*dndt TERM IN THE dMdt equation - FAILED
+###### FAILED ATTEMPT TO INCLUDE t*dndt TERM IN THE dMdt EQUATION FROM BATE MUELLER WHITE
 #def func_dMdt(a, dadt, r_scal, e, f, p_r, p_s):
     #n = (mu/a**3)**0.5
     #t = 3600
     #dndt = (-3/2)*(n/a)*dadt
     #return (-1/(n*a))*(2*r_scal/a - (1-e**2)*math.cos(f)/e)*p_r - ((1-e**2)/(n*a*e))*(1+r_scal/(a*(1-e**2)**0.5))*math.sin(f)*p_s - dndt*t
 
-#ATTEMPT TO USE dfdt FROM CURTIS - FAILED
+####### FAILED ATTEMPT TO USE dfdt FROM CURTIS
 #def func_dfdt(a, e, r_scal, f, p_r, p_s):
     #h = (mu*a*(1-e**2))**0.5
     #return (h/r_scal**2) + (1/(e*h))*((h**2/mu)*math.cos(f)*p_r - ((h**2/mu)+r_scal)*math.sin(f)*p_s)
