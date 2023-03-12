@@ -1,0 +1,258 @@
+#import packages 
+import numpy as np
+import math
+from scipy.integrate import solve_ivp, odeint
+import matplotlib.pyplot as plt
+
+#given conditions
+a0 = 26600 
+e0 = 0.74
+i0 = 1.10654
+om0 = math.pi*45/180
+w0 = math.pi*5/180
+M0 = math.pi*10/180
+
+mu = 398600
+J2 = 0.00108263
+R = 6370
+
+#custom functions to calculate Orbit State from Orbital Elements
+def M_to_Eccen(M, e, tol = 1e-13, n=10):
+    i = 0
+    delta = 1
+    Ei = (M + e/2) if M < math.pi else (M - e/2)
+    while abs(delta)>tol and i<=n:
+        delta = (Ei - e*math.sin(Ei) - M)/(1-e*math.cos(Ei))
+        Ei = Ei - delta
+        i+=1
+    return Ei   
+
+def Eccen_to_f(E, e):
+    return 2*math.atan((np.sqrt((1+e)/(1-e)))*math.tan(E/2))
+
+def a_to_h(a, e):
+    return np.sqrt(mu*a*(1-e**2))
+
+def r_scal_using_a(a, e, f):
+    return a*(1-e**2)/(1+e*math.cos(f))
+
+def r_scal_using_h(h, e, f):
+    return (h**2/mu)*(1/(1+e*math.cos(f)))
+
+def r_vec_peri(r_scal, f):
+    return r_scal*np.array([math.cos(f), math.sin(f), 0])
+
+def v_vec_peri(h, e, f):
+    return (mu/h)*np.array([-math.sin(f), e+math.cos(f), 0])
+
+def R3_w(w):
+    return np.array([[math.cos(w), math.sin(w), 0],[-math.sin(w), math.cos(w), 0],[0,0,1]])
+
+def R1_i(i):
+    return np.array([[1,0,0],[0, math.cos(i), math.sin(i)],[0, -math.sin(i), math.cos(i)]])
+
+def R3_om(om):
+    return np.array([[math.cos(om), math.sin(om), 0],[-math.sin(om), math.cos(om), 0],[0,0,1]])
+
+def geo_to_peri_cosmatrix(R3w, R1i, R3om):
+    n = np.matmul(R3w, R1i)
+    return np.matmul(n, R3om)
+    
+#J2 disturbing specific force functions in RSW frame
+def func_leg_poly_1_0(i, w, f):
+    u = w + f
+    a = math.sin(i)*math.sin(u)
+    return a
+
+def func_leg_poly_2_0(i, w, f):
+    u = w + f
+    a = math.sin(i)*math.sin(u)
+    return (1/2)*(3*a**2 - 1)
+
+def func_leg_poly_prime(i, w, f, leg_poly_2_0, leg_poly_1_0):
+    u = w + f
+    a = math.sin(i)*math.sin(u)
+    return (1/(1-a**2))*(-2*a*leg_poly_2_0 + 2*leg_poly_1_0)
+    #return -2*a*leg_poly_2_0 + 2*leg_poly_1_0 - ABOVE "return" EQUATION IS CORRECT
+
+def func_p_r(r_scal, leg_poly_2_0):
+    return (mu/r_scal**2)*J2*3*(R/r_scal)**2*leg_poly_2_0
+
+def func_p_s(w, f, r_scal, i, leg_poly_prime):
+    u = w + f
+    return -1*(mu/r_scal**2)*math.sin(i)*math.cos(u)*J2*(R/r_scal)**2*leg_poly_prime
+
+def func_p_w(r_scal, i, leg_poly_prime):
+    return -1*(mu/r_scal**2)*math.cos(i)*J2*(R/r_scal)**2*leg_poly_prime
+
+#def curt_p_r(r_scal, i, w, f):
+    #u = w + f
+    #return (-3/2)*J2*mu*(R**2/r_scal**4)*(1-3*math.sin(i)**2*math.sin(u)**2)
+
+#def curt_p_s(r_scal, i, w, f):
+    #u = w + f
+    #return (-3/2)*J2*mu*(R**2/r_scal**4)*math.sin(i)**2*math.sin(2*u)
+
+#def curt_p_s(r_scal, i, w, f):
+    #u = w + f
+    #return (-3/2)*J2*mu*(R**2/r_scal**4)*math.sin(2*i)*math.sin(u)
+
+
+#Gauss planetary equations for rate of change of orbital elements a,e,i,om,w,M0
+def func_dadt(a, e, f, p_r, r_scal, p_s):
+    n = (mu/a**3)**0.5
+    p = a*(1-e**2)
+    return (2/(n*(1-e**2)**0.5))*(e*math.sin(f)*p_r + (p / r_scal)*p_s) #OK
+
+def func_dedt(a, e, f, p_r, p_s):
+    n = (mu/a**3)**0.5
+    return ((1-e**2)**0.5/(n*a))*(math.sin(f)*p_r + p_s*(math.cos(f) + (e+math.cos(f))/(1+e*math.cos(f)))) #OK
+
+def func_didt(a, w, f, r_scal, e, p_w):
+    n = (mu/a**3)**0.5
+    u = w + f
+    return (r_scal*math.cos(u)/(n*a**2*(1-e**2)**0.5))*p_w #OK
+
+def func_domdt(a, w, f, r_scal, i, e, p_w):
+    n = (mu/a**3)**0.5
+    u = w + f
+    return ((r_scal*math.sin(u))/((n*a**2)*math.sin(i)*(1-e**2)**0.5))*p_w #ok
+
+def func_dwdt(a, w, f, e, p_r, r_scal, p_s, i, p_w):
+    n = (mu/a**3)**0.5
+    u = w + f
+    h = (mu*a*(1-e**2))**0.5
+    p = a*(1-e**2)
+    return ((1-e**2)**0.5/(n*a*e))*(-math.cos(f)*p_r + math.sin(f)*(1+r_scal/p)*p_s) - ((r_scal*(math.cos(i)/math.sin(i))*math.sin(u))/h)*p_w    
+    #ok
+
+#def func_dMdt(a, e, f, r_scal, p_r, p_s):
+    #n = (mu/a**3)**0.5
+    #p = a*(1-e**2)
+    #return (1/(n*e*a**2))*((p*math.cos(f)-2*e*r_scal)*p_r - (p+r_scal)*math.sin(f)*p_s) #OK
+
+#ATTEMPT TO USE dfdt FROM BATTIN
+def func_dfdt(a, e, r_scal, f, p_r, p_s):
+    h = (mu*a*(1-e**2))**0.5
+    p = a*(1-e**2)
+    return (h/r_scal**2) + (1/(e*h))*(p*math.cos(f)*p_r - (p+r_scal)*math.sin(f)*p_s)
+
+#ATTEMPT TO USE dfdt FROM VALLADO WITH dedt and dhdt components - FAILED
+#def func_dfdt(a, e, r_scal, p_s, f, dedt):
+    #h = (mu*a*(1-e**2))**0.5
+    #dhdt = r_scal*p_s
+    #return (1/(r_scal*e*math.sin(f)))*(r_scal*math.cos(f)*dedt - (2*h/mu)*dhdt)
+    
+#ATTEMPT TO USE dfdt FROM VALLADO - FAILED
+#def func_dfdt(a, e, f, p_r, p_s):
+    #n = (mu/a**3)**0.5
+    #return ((1-e**2)**0.5/(n*a*e))*(math.cos(f)*p_r - ((2+e*math.cos(f))/(1+e*math.cos(f)))*p_s)
+
+#ATTEMPT TO INCLUDE t*dndt TERM IN THE dMdt equation - FAILED
+#def func_dMdt(a, dadt, r_scal, e, f, p_r, p_s):
+    #n = (mu/a**3)**0.5
+    #t = 3600
+    #dndt = (-3/2)*(n/a)*dadt
+    #return (-1/(n*a))*(2*r_scal/a - (1-e**2)*math.cos(f)/e)*p_r - ((1-e**2)/(n*a*e))*(1+r_scal/(a*(1-e**2)**0.5))*math.sin(f)*p_s - dndt*t
+
+#ATTEMPT TO USE dfdt FROM CURTIS - FAILED
+#def func_dfdt(a, e, r_scal, f, p_r, p_s):
+    #h = (mu*a*(1-e**2))**0.5
+    #return (h/r_scal**2) + (1/(e*h))*((h**2/mu)*math.cos(f)*p_r - ((h**2/mu)+r_scal)*math.sin(f)*p_s)
+
+def func_integrator_GaussVOP(t, orb_elem_set):
+    a = orb_elem_set[0]
+    e = orb_elem_set[1]
+    i = orb_elem_set[2]
+    om = orb_elem_set[3]
+    w = orb_elem_set[4]
+    #dfdt ATTEMPT #M0 = orb_elem_set[5]
+    f = orb_elem_set[5]
+    
+    #dfdt ATTEMPT #E = M_to_Eccen(M0)
+    #dfdt ATTEMPT #f = Eccen_to_f(E)
+    r_scal = r_scal_using_a(a, e, f)
+    
+    leg_poly_1_0 = func_leg_poly_1_0(i, w, f)
+    leg_poly_2_0 = func_leg_poly_2_0(i, w, f)
+    leg_poly_prime = func_leg_poly_prime(i, w, f, leg_poly_2_0, leg_poly_1_0)
+        
+    p_r = func_p_r(r_scal, leg_poly_2_0) #curt_p_r(r_scal, i, w, f)
+    p_s = func_p_s(w, f, r_scal, i, leg_poly_prime) #curt_p_s(r_scal, i, w, f)  
+    p_w = func_p_w(r_scal, i, leg_poly_prime) #curt_p_s(r_scal, i, w, f) 
+    
+    dadt = func_dadt(a, e, f, p_r, r_scal, p_s)
+    dedt = func_dedt(a, e, f, p_r, p_s)
+    didt = func_didt(a, w, f, r_scal, e, p_w)
+    domdt = func_domdt(a, w, f, r_scal, i, e, p_w)
+    dwdt = func_dwdt(a, w, f, e, p_r, r_scal, p_s, i, p_w)
+    #FAILED : dMdt = func_dMdt(a, dadt, r_scal, e, f, p_r, p_s)
+    dfdt = func_dfdt(a, e, r_scal, f, p_r, p_s) #dfdt ATTEMPT
+    
+    deriv_orb_elem_set = np.zeros(6)
+    
+    deriv_orb_elem_set[0] = dadt
+    deriv_orb_elem_set[1] = dedt
+    deriv_orb_elem_set[2] = didt
+    deriv_orb_elem_set[3] = domdt
+    deriv_orb_elem_set[4] = dwdt
+    #dfdt ATTEMPT # deriv_orb_elem_set[5] = dMdt
+    deriv_orb_elem_set[5] = dfdt
+                                
+    return deriv_orb_elem_set
+
+E0 = M_to_Eccen(M0, e0)
+f0 = Eccen_to_f(E0, e0)
+
+orb_elem_set_0 = np.array([a0, e0, i0, om0, w0, f0])
+
+day = 24*3600
+T = 100*day #in seconds
+tol = 1e-5
+stamps = math.floor(T/60) #nearest minute
+#stamps = int(T/3600) #nearest hour
+t = np.linspace(0, T, stamps)
+
+#int_sol = solve_ivp(func_integrator_GaussVOP, t_span = (0, T), method = 'RK45', y0 = orb_elem_set_0, t_eval = t, rtol = tol, atol = tol*100)
+int_sol = odeint(func = func_integrator_GaussVOP, t = t, tfirst = True, y0 = orb_elem_set_0, rtol = tol, atol = tol*100)
+
+#orb_elem_set = np.swapaxes(int_sol.y, 0, 1)
+orb_elem_set = int_sol
+#print(type(int_sol.y))
+
+fig2,ax = plt.subplots(figsize = (10,4))
+ax.plot(t, orb_elem_set[:,0]-26600, 'black')
+ax.set_xlabel('time/min')
+ax.set_ylabel('delta a/km')
+ax.set_title('Plot of Semimajor Axis Variation of J2 Perturbed Orbit')
+plt.show()
+
+
+fig3,ax = plt.subplots(figsize = (10,4))
+ax.plot(t, orb_elem_set[:,1]-0.74, 'green')
+ax.set_xlabel('time/min')
+ax.set_ylabel('delta e')
+ax.set_title('Plot of Eccentricity Variations of J2 Perturbed Orbit')
+plt.show()
+
+fig4,ax = plt.subplots(figsize = (10,4))
+ax.plot(t, (orb_elem_set[:,2] - 1.10654)*180/math.pi, 'blue')
+ax.set_xlabel('time/min')
+ax.set_ylabel('delta i/deg')
+ax.set_title('Plot of Inclination Variations of J2 Perturbed Orbit')
+plt.show()
+
+fig5,ax = plt.subplots(figsize = (10,4))
+ax.plot(t, (orb_elem_set[:,3] - math.pi*45/180)*180/math.pi, 'orange')
+ax.set_xlabel('time/min')
+ax.set_ylabel('delta Om/deg')
+ax.set_title('Plot of Right Ascension Variations of J2 Perturbed Orbit')
+plt.show()
+
+fig6,ax = plt.subplots(figsize = (10,4))
+ax.plot(t, (orb_elem_set[:,4] - math.pi*5/180)*180/math.pi, 'purple')
+ax.set_xlabel('time/min')
+ax.set_ylabel('delta w/deg')
+ax.set_title('Plot of Periapse Argument Variations of J2 Perturbed Orbit')
+plt.show()
+
